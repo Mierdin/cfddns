@@ -4,6 +4,7 @@ extern crate cloudflare;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::{thread, time};
+use log::{info, debug, warn};
 
 use clap::{App, AppSettings, Arg};
 use cloudflare::endpoints::dns;
@@ -16,26 +17,27 @@ use cloudflare::framework::{
 
 fn print_response<T: ApiResult>(response: ApiResponse<T>) {
     match response {
-        Ok(success) => println!("Success: {:#?}", success),
+        Ok(success) => debug!("Success: {:#?}", success),
         Err(e) => match e {
             ApiFailure::Error(status, errors) => {
-                println!("HTTP {}:", status);
+                warn!("HTTP {}:", status);
                 for err in errors.errors {
-                    println!("Error {}: {}", err.code, err.message);
+                    warn!("Error {}: {}", err.code, err.message);
                     for (k, v) in err.other {
-                        println!("{}: {}", k, v);
+                        warn!("{}: {}", k, v);
                     }
                 }
                 for (k, v) in errors.other {
-                    println!("{}: {}", k, v);
+                    warn!("{}: {}", k, v);
                 }
             }
-            ApiFailure::Invalid(reqwest_err) => println!("Error: {}", reqwest_err),
+            ApiFailure::Invalid(reqwest_err) => warn!("Error: {}", reqwest_err),
         },
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
 
     let cli = App::new("cfddns")
     .version("0.1")
@@ -58,7 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .help("API token generated on the \"My Account\" page")
         .takes_value(true)
         .conflicts_with_all(&["email", "auth-key"]))
-    // TODO - consider adding a lookup function for these two
     .arg(Arg::with_name("zone-id")
         .long("zone-id")
         .env("CFDDNS_ZONE_ID")
@@ -69,6 +70,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .env("CFDDNS_RECORD_ID")
         .help("ID of record to update")
         .takes_value(true))
+    .arg(Arg::with_name("record-name")
+        .long("record-name")
+        .env("CFDDNS_RECORD_NAME")
+        .help("Name of record to update")
+        .takes_value(true))
+    .arg(Arg::with_name("interval")
+        .long("interval")
+        .env("CFDDNS_INTERVAL")
+        .help("Interval (in seconds) to wait in between updates (defaults to 1800)")
+        .takes_value(true))
     .setting(AppSettings::ArgRequiredElseHelp);
 
     let matches = cli.get_matches();
@@ -77,47 +88,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = matches.value_of("auth-key");
     let token = matches.value_of("auth-token");
     let zone_id = matches.value_of("zone-id").unwrap();
+    let record_name = matches.value_of("record-name").unwrap();
     let record_id = matches.value_of("record-id").unwrap();
-
-    // TODO - configurable
-    let sleep_duration = time::Duration::from_secs(1800);
-
-    loop {
-
-        thread::sleep(sleep_duration);
-
-        process(
-            email,
-            key,
-            token,
-            record_id,
-            zone_id
-        )?;
-    }
-
-    Ok(())
-}
-
-fn get_ip_addr() -> Result<Ipv4Addr, Box<dyn std::error::Error>>{
-    let addr = reqwest::blocking::get("https://api.ipify.org/")?
-    .text()?;
-    println!("IP is {}", addr);
-
-    // TODO - detect std::net::AddrParseError
-    let addr = Ipv4Addr::from_str(&addr)?;
-
-    Ok(addr)
-}
-
-fn process(
-    email: std::option::Option<&str>,
-    key: std::option::Option<&str>,
-    token: std::option::Option<&str>,
-    record_id: &str,
-    zone_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO - handle error
-    let addr = get_ip_addr().unwrap();
+    let interval = match matches.value_of("interval") {
+        None => 1800 as u64,
+        Some(s) => {
+            match s.parse::<u64>() {
+                Ok(n) => n,
+                Err(_) => 1800 as u64,
+            }
+        }
+    };
 
     let credentials: Credentials = if let Some(key) = key {
         Credentials::UserAuthKey {
@@ -138,16 +119,48 @@ fn process(
         Environment::Production,
     )?;
 
+    loop {
+        update(
+            &api_client,
+            record_id,
+            record_name,
+            zone_id
+        )?;
+
+        info!("Update successful. Sleeping for {} seconds.", interval);
+        thread::sleep(time::Duration::from_secs(interval));
+    }
+}
+
+fn get_ip_addr() -> Result<Ipv4Addr, Box<dyn std::error::Error>>{
+    let addr = reqwest::blocking::get("https://api.ipify.org/")?
+    .text()?;
+    info!("Detected IPv4 address: {}", addr);
+
+    // TODO - detect std::net::AddrParseError
+    let addr = Ipv4Addr::from_str(&addr)?;
+
+    Ok(addr)
+}
+
+fn update<ApiClientType: ApiClient>(
+    api_client: &ApiClientType,
+    record_id: &str,
+    record_name: &str,
+    zone_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+
+    let addr = get_ip_addr()?;
+
+    // TODO - check to see if an update is needed first?
+
     let response = api_client.request(&dns::UpdateDnsRecord {
         identifier: record_id,
         zone_identifier: zone_id,
         params: dns::UpdateDnsRecordParams {
             ttl: Some(1),
             proxied: Some(false),
-
-            // TODO - configurable
-            name: "remote",
-
+            name: record_name,
             // TODO - add v6
             content: dns::DnsContent::A{
                 content: addr,
