@@ -1,0 +1,78 @@
+name: Rust
+on: [push]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Update apt cache
+      run: sudo apt-get update
+    - name: Install libasound2-dev
+      run: sudo apt-get install libasound2-dev
+    - name: Checkout branch
+      uses: actions/checkout@v2
+    - name: Set up private key for private dependencies
+      uses: webfactory/ssh-agent@v0.4.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    - name: Cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Check changelog
+      run: .scripts/check-changelog.sh
+    - name: License Check
+      run: sh .scripts/license_check.sh
+    - name: rustfmt
+      run: cargo fmt -- --check
+    - name: Lint
+      run: cargo clippy --all-targets --all-features -- -D warnings
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Update apt cache
+      run: sudo apt-get update
+    - name: Install libasound2-dev
+      run: sudo apt-get install libasound2-dev
+    - name: Checkout branch
+      uses: actions/checkout@v2
+    - name: Set up private key for private dependencies
+      uses: webfactory/ssh-agent@v0.4.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    - name: Cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Run tests
+      run: cargo test --all --verbose
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Update apt cache
+      run: sudo apt-get update
+    - name: Install libasound2-dev
+      run: sudo apt-get install libasound2-dev
+    - name: Checkout branch
+      uses: actions/checkout@v2
+    - name: Set up private key for private dependencies
+      uses: webfactory/ssh-agent@v0.4.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    - name: Cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Build
+      run: cargo build --verbose
