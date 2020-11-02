@@ -3,6 +3,7 @@ extern crate cloudflare;
 
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+use std::{thread, time};
 
 use clap::{App, AppSettings, Arg};
 use cloudflare::endpoints::dns;
@@ -78,6 +79,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let zone_id = matches.value_of("zone-id").unwrap();
     let record_id = matches.value_of("record-id").unwrap();
 
+    // TODO - configurable
+    let sleep_duration = time::Duration::from_secs(1800);
+
+    loop {
+
+        thread::sleep(sleep_duration);
+
+        process(
+            email,
+            key,
+            token,
+            record_id,
+            zone_id
+        )?;
+    }
+
+    Ok(())
+}
+
+fn get_ip_addr() -> Result<Ipv4Addr, Box<dyn std::error::Error>>{
+    let addr = reqwest::blocking::get("https://api.ipify.org/")?
+    .text()?;
+    println!("IP is {}", addr);
+
+    // TODO - detect std::net::AddrParseError
+    let addr = Ipv4Addr::from_str(&addr)?;
+
+    Ok(addr)
+}
+
+fn process(
+    email: std::option::Option<&str>,
+    key: std::option::Option<&str>,
+    token: std::option::Option<&str>,
+    record_id: &str,
+    zone_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // TODO - handle error
+    let addr = get_ip_addr().unwrap();
+
     let credentials: Credentials = if let Some(key) = key {
         Credentials::UserAuthKey {
             email: email.unwrap().to_string(),
@@ -90,9 +131,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         panic!("Either API token or API key + email pair must be provided")
     };
-
-    // TODO - handle error
-    let addr = get_ip_addr().unwrap();
 
     let api_client = HttpApiClient::new(
         credentials,
@@ -120,15 +158,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_response(response);
 
     Ok(())
-}
-
-fn get_ip_addr() -> Result<Ipv4Addr, Box<dyn std::error::Error>>{
-    let addr = reqwest::blocking::get("https://api.ipify.org/")?
-    .text()?;
-    println!("IP is {}", addr);
-
-    // TODO - detect std::net::AddrParseError
-    let addr = Ipv4Addr::from_str(&addr)?;
-
-    Ok(addr)
 }
